@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-50%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-76%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -151,6 +151,48 @@ needs no special case anywhere in the library.
 
 ---
 
+## `FixedPoint` — WAD and RAY
+
+`contracts/FixedPoint.sol` wraps the two scales almost every DeFi number lives
+in: **WAD** (1e18) for prices, shares and percentages, **RAY** (1e27) for
+interest indices that compound.
+
+```solidity
+uint256 fee     = FixedPoint.mulWadUp(amount, feeRate);      // charge up
+uint256 payout  = FixedPoint.mulWadDown(amount, shareRate);  // pay down
+uint256 index   = FixedPoint.mulRayDown(index, growth);
+```
+
+Mixing the two scales is a routine and expensive mistake — a RAY treated as a
+WAD is off by a factor of a billion, and the code still compiles because both
+are `uint256`. Naming the scale at the call site is the cheapest defence
+available.
+
+Every function delegates to `Rounding.mulDiv`, so the 512-bit intermediate
+applies throughout: `mulWadDown(1e39, 1e39)` is fine even though `1e39 * 1e39`
+overflows a `uint256` on its own.
+
+### Why RAY exists
+
+The suite demonstrates it rather than asserting it in prose. Take a rate of
+`1 + 1e-27`:
+
+```solidity
+FixedPoint.mulWadDown(1e30, WAD)      // 1e30        — the rate isn't representable
+FixedPoint.mulRayDown(1e30, RAY + 1)  // 1e30 + 1000 — it survives
+```
+
+At WAD scale that rate *is* exactly 1.0, so applying it does nothing. This is
+why compounding indices are held in RAY: at WAD, a small per-second rate rounds
+to a no-op and the index never moves.
+
+`wadToRay` takes no direction — widening is exact — and reverts rather than
+wrapping when a WAD is too large to represent, since silently wrapping would
+corrupt an index instead of halting the call. `rayToWad` does take a direction:
+nine digits are being discarded and something has to absorb them.
+
+---
+
 ## Implementation notes
 
 **512-bit intermediate precision.** `mulDiv` computes `x * y / denominator`
@@ -186,7 +228,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 50 passing
+npm test          # 76 passing
 npm run coverage
 npm run lint
 ```
