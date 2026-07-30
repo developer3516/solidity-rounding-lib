@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-98%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-103%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -245,6 +245,60 @@ BigInt's own truncation — the same correction the library exists to make.
 
 ---
 
+## Gas
+
+`npm run bench` measures this library against OpenZeppelin `Math` and Solmate
+`FixedPointMathLib` on a local node.
+
+**Product fits in 256 bits** — the fast path everything shares:
+
+| | gas |
+| :--- | ---: |
+| Solmate `mulDivUp` | 117 |
+| Solmate `mulDivDown` | 134 |
+| naive `x * y / d` | 206 |
+| **`Rounding.mulDivDown`** | **215** |
+| OZ `Math.mulDiv` | 260 |
+| **`Rounding.mulDivUp`** | **310** |
+| OZ `Math.mulDiv` (Ceil) | 683 |
+
+**Product exceeds 256 bits** — where the intermediate precision earns its cost:
+
+| | gas |
+| :--- | ---: |
+| **`Rounding.mulDivDown`** | **519** |
+| OZ `Math.mulDiv` | 554 |
+| **`Rounding.mulDivUp`** | **614** |
+| OZ `Math.mulDiv` (Ceil) | 977 |
+| Solmate `mulDivDown` | **reverts** |
+| naive `x * y / d` | **reverts** |
+
+Two things worth reading off that.
+
+**Solmate is cheaper because it does less.** It has no 512-bit intermediate, so
+it carries no overflow branch — and it reverts on any input where `x * y`
+overflows, however small the quotient would have been. That is a reasonable
+trade when your operands are bounded; it is not the same function. Both tables
+are here rather than only the flattering one.
+
+**Against OpenZeppelin, which implements the same algorithm**, this comes out
+slightly ahead on both paths. The suite asserts the ratio stays under 1.25×, so
+a regression fails rather than quietly costing users gas.
+
+### How it is measured
+
+Every benchmark function is non-view and writes to storage, so each call
+produces a receipt with a real `gasUsed`. A `view` function measured through
+`estimateGas` would fold in the transaction's intrinsic cost and calldata
+pricing, neither of which says anything about the arithmetic.
+
+A `noop` with an identical signature and an identical storage write is
+subtracted from each result, and the slot is pre-warmed — otherwise the first
+zero-to-non-zero `SSTORE` costs 20,000 gas and swamps everything being
+compared. The figures are deltas, so treat them as relative, not absolute.
+
+---
+
 ## Implementation notes
 
 **512-bit intermediate precision.** `mulDiv` computes `x * y / denominator`
@@ -280,9 +334,10 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 98 passing
+npm test          # 103 passing
 npm run coverage
 npm run lint
+npm run bench     # gas vs OpenZeppelin and Solmate
 ```
 
 The suite is not only unit tests. It runs a **differential fuzz** against a
