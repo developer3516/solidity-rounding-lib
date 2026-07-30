@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-76%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-98%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -193,6 +193,58 @@ nine digits are being discarded and something has to absorb them.
 
 ---
 
+## `SignedRounding` — `int256`, where floor is not truncation
+
+Signed rounding has a trap that unsigned rounding does not.
+
+Solidity's `/` truncates **toward zero**. For positive operands that is the
+same as flooring, so the distinction never surfaces and it is easy to assume
+`a / b` floors. It does not:
+
+```solidity
+int256(-7) / 2                    // -3   ← truncation
+SignedRounding.divDown(-7, 2)     // -4   ← floor
+SignedRounding.divUp(-7, 2)       // -3   ← ceiling
+```
+
+On negatives, native division agrees with `Direction.Up`, not
+`Direction.Down`. A codebase reaching for this library expecting `Down` to mean
+"what `/` already did" will find every negative result shifted by one.
+
+The definitions here are absolute rather than relative to zero:
+
+| | |
+| :--- | :--- |
+| `Direction.Down` | toward −∞ (floor) |
+| `Direction.Up` | toward +∞ (ceiling) |
+
+Monotonic and sign-independent, which is what makes them safe for signed
+accounting: flooring a loss and flooring a gain move the value the same way, so
+a balance cannot drift upward merely by crossing zero. Truncation does drift —
+it pulls negatives up and positives down.
+
+### `int256.min`
+
+The awkward value gets explicit handling rather than being hoped over.
+
+`abs(type(int256).min)` is `2**255`, one past `int256.max`. The negation
+`-x` overflows, so it is `unchecked` — not as a workaround, but because
+wrapping produces the right answer: negating `-2**255` yields the same bit
+pattern, and reading those bits as unsigned is exactly `2**255`.
+
+That magnitude is representable, but only as a negative:
+
+```solidity
+SignedRounding.mulDivDown(2**254, 2, -1)  // int256.min
+SignedRounding.mulDivDown(2**254, 2,  1)  // reverts MulDivOverflow
+```
+
+Both are pinned in the suite, along with all eight operand-sign combinations
+and a differential fuzz against a `BigInt` reference that has to correct for
+BigInt's own truncation — the same correction the library exists to make.
+
+---
+
 ## Implementation notes
 
 **512-bit intermediate precision.** `mulDiv` computes `x * y / denominator`
@@ -228,7 +280,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 76 passing
+npm test          # 98 passing
 npm run coverage
 npm run lint
 ```
