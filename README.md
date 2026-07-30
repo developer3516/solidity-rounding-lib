@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-33%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-50%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -100,6 +100,57 @@ function _convertBack(uint256 shares, Rounding.Direction direction) internal vie
 
 ---
 
+## `SharesMath` — the library applied
+
+`contracts/SharesMath.sol` is what `Rounding` exists for. A vault performs the
+same multiply-divide in four places, and the correct direction differs in each:
+
+| operation | user supplies | rounding | favours |
+| :--- | :--- | :--- | :--- |
+| `previewDeposit` | assets | **Down** | the vault |
+| `previewMint` | shares | **Up** | the vault |
+| `previewWithdraw` | assets | **Up** | the vault |
+| `previewRedeem` | shares | **Down** | the vault |
+
+Every row rounds toward the vault. That is not a coincidence — it is the only
+assignment where no sequence of operations lets a user extract more than they
+put in. Get one row backwards and it is not a rounding nuisance; it is a loop
+that mints value.
+
+```solidity
+uint256 shares = SharesMath.previewDeposit(assets, totalAssets, totalShares, DECIMALS_OFFSET);
+uint256 owed   = SharesMath.previewRedeem(shares, totalAssets, totalShares, DECIMALS_OFFSET);
+```
+
+Naming the four operations removes the choice. `toShares` and `toAssets` are
+still there when you need an explicit `Direction`.
+
+### Virtual assets and shares
+
+Both conversions add 1 virtual asset and `10**offset` virtual shares. This
+defends against the **inflation attack**: on an empty vault an attacker
+deposits 1 wei, receives 1 share, then donates a large balance directly to the
+vault. The share price explodes, the next depositor's shares truncate, and the
+attacker redeems the difference.
+
+The test suite runs that exact attack — 1 wei seed, a 10,000-token donation, a
+10,000-token victim — and measures what the victim loses:
+
+| decimals offset | victim receives | victim loses |
+| ---: | ---: | ---: |
+| 0 | **1 share** | **33.33%** |
+| 3 | 1,999 shares | 0.02% |
+| 6 | 1,999,999 shares | 0 |
+| 9 | 1,999,999,999 shares | 0 |
+
+Those numbers are asserted exactly, not as bounds — the point of the offset is
+how sharply the loss falls off, so a regression should fail loudly.
+
+The virtual amounts also keep both denominators non-zero, so an empty vault
+needs no special case anywhere in the library.
+
+---
+
 ## Implementation notes
 
 **512-bit intermediate precision.** `mulDiv` computes `x * y / denominator`
@@ -135,7 +186,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 33 passing
+npm test          # 50 passing
 npm run coverage
 npm run lint
 ```
