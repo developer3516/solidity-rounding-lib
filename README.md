@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-103%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-121%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -245,6 +245,50 @@ BigInt's own truncation — the same correction the library exists to make.
 
 ---
 
+## The counterexample
+
+`contracts/examples/` holds two vaults. `RoundingVault` is a minimal
+ERC-4626-shaped vault built on `SharesMath`. `BrokenVault` extends it and
+changes **one argument**:
+
+```solidity
+function previewRedeem(uint256 shares) public view override returns (uint256) {
+    return SharesMath.toAssets(
+        shares, totalAssets(), totalSupply(), decimalsOffset,
+        Rounding.Direction.Up          // <-- should be Down
+    );
+}
+```
+
+It compiles. It passes any test that checks one deposit and one withdrawal. A
+reviewer skimming it sees a `mulDiv` with an explicit direction — which is what
+correct code looks like.
+
+Here is what the suite measures on both vaults. Same deposit, same vault state;
+the only variable is how many instalments the exit is split into:
+
+| instalments | 1 | 2 | 5 | 10 | 25 | 200 |
+| :--- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `RoundingVault` | −1 | −1 | −3 | −3 | −3 | −3 |
+| `BrokenVault` | 0 | **+1** | **+2** | **+3** | +3 | +3 |
+
+The correct vault is never ahead, and splitting the exit buys nothing. The
+broken one turns a break-even withdrawal into a profitable one as soon as the
+exit is taken in pieces — each instalment collects the ceiling, and the
+difference comes out of the other depositors' backing. A test asserts exactly
+that: a passive holder's shares are worth less afterwards, having done nothing.
+
+Splitting an exit is the sharp test rather than deposit-then-withdraw
+round-tripping, where the deposit's floor and the redemption's ceiling cancel
+out — which is why this class of bug survives casual testing.
+
+**The honest bound:** the leak plateaus at +3 because this vault was seeded
+with 7 wei of dust, and a ceiling cannot invent value — it can only hand over
+what has accumulated. The bound is dust, not anything in the code, and a live
+vault accrues dust on every yield event.
+
+---
+
 ## Gas
 
 `npm run bench` measures this library against OpenZeppelin `Math` and Solmate
@@ -334,7 +378,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 103 passing
+npm test          # 121 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
