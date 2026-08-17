@@ -5,6 +5,9 @@
   "license": "MIT",
   "files": [
     "contracts/Rounding.sol",
+    "contracts/SharesMath.sol",
+    "contracts/FixedPoint.sol",
+    "contracts/SignedRounding.sol",
     "README.md",
     "LICENSE"
   ],
