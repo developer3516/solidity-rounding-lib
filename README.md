@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-121%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-148%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -289,6 +289,53 @@ vault accrues dust on every yield event.
 
 ---
 
+## `Percentage` — fees that add up
+
+A fee is not one calculation, it is two: what the protocol takes, and what the
+user is left with. The obvious way to write them is independently —
+
+```solidity
+fee = amount * feeBps / 10_000;
+net = amount * (10_000 - feeBps) / 10_000;
+```
+
+— and that is wrong roughly half the time. Both truncate, so whenever the
+division is inexact the two sum to `amount - 1` and a unit vanishes. Round both
+up instead and they sum to `amount + 1`, which is worse: the contract now owes
+more than it holds, and on a large enough batch it cannot settle.
+
+`split` computes the fee and derives the net by **subtraction**:
+
+```solidity
+(uint256 fee, uint256 net) = Percentage.split(amount, feeBps);
+// fee + net == amount, exactly, for every input
+```
+
+No rounding argument to get wrong, and nothing to reason about. The suite
+asserts the identity across every amount and rate it can think of, including
+`type(uint256).max`, and asserts the naive form failing the same inputs:
+
+| | `split(1, 3333)` | 200-item batch |
+| :--- | :--- | :--- |
+| naive independent | `0 + 0 = 0` — a unit gone | short by one per inexact item |
+| `Percentage.split` | `1 + 0 = 1` | sums exactly |
+
+The direction still matters for the part that *is* a choice. `feeOn` rounds
+**up**, toward the protocol — a fee that rounds down is a protocol donating
+dust on every transaction it processes. And because `bps <= BPS` guarantees the
+fee never exceeds the amount, the subtraction in `netOf` cannot underflow;
+there is a test pinning that too.
+
+`applyBps` deliberately *does* accept a rate above 100% — liquidation bonuses
+and penalty multipliers legitimately exceed `BPS`, and rejecting them would
+push callers back to hand-rolled `mulDiv`. `feeOn` and `subBps` do not, since
+there a rate over 100% is a bug.
+
+Also here: `addBps`, `subBps` (where the direction describes the *deduction*,
+so `Up` leaves less), and `bpsOf`.
+
+---
+
 ## Gas
 
 `npm run bench` measures this library against OpenZeppelin `Math` and Solmate
@@ -378,7 +425,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 121 passing
+npm test          # 148 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
