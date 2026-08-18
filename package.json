@@ -1,13 +1,14 @@
 {
   "name": "solidity-rounding-lib",
   "version": "0.1.0",
-  "description": "Directional rounding for Solidity — full-precision mulDiv with a caller-chosen rounding direction, so value never rounds the wrong way.",
+  "description": "Directional rounding for Solidity \u2014 full-precision mulDiv with a caller-chosen rounding direction, so value never rounds the wrong way.",
   "license": "MIT",
   "files": [
     "contracts/Rounding.sol",
     "contracts/SharesMath.sol",
     "contracts/FixedPoint.sol",
     "contracts/SignedRounding.sol",
+    "contracts/Percentage.sol",
     "README.md",
     "LICENSE"
   ],
