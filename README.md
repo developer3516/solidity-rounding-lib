@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-148%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-174%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -245,6 +245,63 @@ BigInt's own truncation — the same correction the library exists to make.
 
 ---
 
+## `Interest` — accrual, and the asymmetry that keeps a market solvent
+
+A lending market accrues interest twice over the same period: once onto what
+borrowers owe, once onto what suppliers are owed. **The two must not round the
+same way.**
+
+| | rounds | because |
+| :--- | :--- | :--- |
+| `applyToDebt` | **Up** | the borrower owes at least this |
+| `applyToClaim` | **Down** | the supplier is owed at most this |
+
+Round both down and the market pays out interest it never collected. Round both
+up and it promises suppliers more than borrowers were charged. Either way the
+gap accrues every block and only surfaces when the last supplier tries to exit.
+
+```solidity
+uint256 factor = Interest.compound(ratePerSecond, block.timestamp - lastAccrual);
+
+totalDebt   = Interest.applyToDebt(totalDebt, factor);
+totalSupply = Interest.applyToClaim(totalSupply, factor);
+```
+
+The suite simulates exactly that — one borrower, one supplier, equal principals,
+daily accrual for a year — and asserts the market ends able to pay.
+
+### `advanceIndex` fixes its own direction
+
+Unlike the pair above, this one takes no `Direction` argument at all. An index
+that rounded up would grow on every touch, so a market poked in a loop would
+charge more interest than one left alone — a bug that pays whoever calls
+`accrue` repeatedly. A test advances an index ten times by a no-op factor and
+asserts it has not moved.
+
+### Compounding
+
+`compound` uses the three-term binomial expansion — the same approximation Aave
+uses, for the same reason: the exact power costs far more gas than the error is
+worth.
+
+```
+1 + nx + n(n-1)/2 x² + n(n-1)(n-2)/6 x³
+```
+
+The omitted terms are all positive, so the result is always an
+**underestimate**. That is the safe direction for a borrow index: it can never
+charge more than true compounding would. The suite checks it against exact
+BigInt compounding and finds zero basis points of error over a day.
+
+Because the truncation grows with the period, `compound` **reverts** beyond 400
+days rather than quietly drifting.
+
+Rates are per-second in RAY, which is the concrete answer to why `FixedPoint`
+carries RAY at all: 5% APR is about `1.0000000015` per second, and at WAD scale
+that rate is exactly `1.0` — the index would never move.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -425,7 +482,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 148 passing
+npm test          # 174 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate

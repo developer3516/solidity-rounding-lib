@@ -9,6 +9,7 @@
     "contracts/FixedPoint.sol",
     "contracts/SignedRounding.sol",
     "contracts/Percentage.sol",
+    "contracts/Interest.sol",
     "README.md",
     "LICENSE"
   ],
