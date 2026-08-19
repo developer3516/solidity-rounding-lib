@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-199%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-222%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -353,6 +353,62 @@ caps at 77, since `10**78` overflows a `uint256`.
 
 ---
 
+## `Liquidation` — where the direction rule inverts
+
+This is where the rest of the library meets. A liquidation crosses two token
+scales (`Decimals`), applies a bonus in basis points (`Percentage`), and
+divides twice at full precision (`Rounding`). Each is a place a unit can go the
+wrong way, and the party who loses it is always the same: the borrower being
+forcibly closed out, who is not in the room.
+
+**So the rule inverts here.** Everywhere else in this library the protocol
+rounds in its own favour, because the counterparty is a voluntary depositor.
+Seizure rounds **down** — the liquidator gets at most what the bonus entitles
+them to, and the dust stays with the borrower.
+
+```solidity
+uint256 seized = Liquidation.collateralToSeize(
+    debtRepaid, 6, usdcPrice,     // repaying USDC
+    18, wethPrice,                // seizing WETH
+    500                           // 5% bonus
+);
+```
+
+The inverse question — *how much must I repay to seize this collateral* —
+rounds **up**, for the mirror-image reason: quote a liquidator too little and
+the position ends up under-repaid, and the shortfall lands on the protocol. A
+test asserts the round trip holds: repaying the quoted amount always buys at
+least the collateral that was asked for.
+
+### The arithmetic, and why it is two steps
+
+```
+seize = repaid × debtPrice × 10^collDec × (BPS + bonus)
+        ───────────────────────────────────────────────
+             collPrice × 10^debtDec × BPS
+```
+
+Written that way it overflows a `uint256` long before the division brings it
+back, so it is two `mulDiv` calls. The intermediate is deliberately the *value
+of the repayment at collateral scale* — largest multiplication first, lossy
+division last. The other order truncates small repayments to zero:
+
+| | |
+| :--- | :--- |
+| 1 USDC of debt, WETH at \$3,000 | `333333333333333` wei |
+| divide-first implementation | `0` |
+
+Both are pinned, along with a repayment of `10**52` where the naive product
+genuinely does overflow and the 512-bit intermediate is the only reason it
+works.
+
+`bonusPortion` splits a seizure into principal and bonus by **subtraction**, so
+`principal + bonus == seized` exactly — the same identity `Percentage.split`
+protects for fees. `maxRepayable` rounds down, because a close factor that
+rounds up is not a bound.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -533,7 +589,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 199 passing
+npm test          # 222 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate

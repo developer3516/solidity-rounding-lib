@@ -11,6 +11,7 @@
     "contracts/Percentage.sol",
     "contracts/Interest.sol",
     "contracts/Decimals.sol",
+    "contracts/Liquidation.sol",
     "README.md",
     "LICENSE"
   ],
