@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-174%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-199%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -302,6 +302,57 @@ that rate is exactly `1.0` — the index would never move.
 
 ---
 
+## `Decimals` — the scale mismatch
+
+USDC has 6 decimals, WETH has 18, WBTC has 8, and a handful of tokens have 0.
+An amount is just a `uint256`; nothing in the type says which scale it is in.
+Almost every protocol that touches more than one token has to reconcile them,
+and it is one of the quietest sources of loss in DeFi.
+
+The two directions are **not symmetric**, and treating them as if they were is
+the bug:
+
+| | | direction argument |
+| :--- | :--- | :--- |
+| `widen` (6 → 18) | multiplies — exact, no remainder | none, because there is no choice |
+| `narrow` (18 → 6) | divides — twelve digits discarded | **required** |
+
+Offering a direction on `widen` would imply a decision that does not exist.
+Omitting it on `narrow` would make one silently.
+
+```solidity
+uint256 inWeth = Decimals.widen(usdcAmount, 6, 18);                        // exact
+uint256 payout = Decimals.narrow(wethAmount, 18, 6, Rounding.Direction.Down); // your call
+```
+
+### The round trip is lossy, and the number is worse than people expect
+
+```solidity
+Decimals.narrow(1, 18, 6, Down);   // 0
+// convert 1 wei of WETH to USDC precision and back -> 0
+```
+
+Not almost zero — **zero**. One wei is a billionth of the smallest
+representable USDC amount. Code that normalises to a common scale to compare
+and then converts back to pay out is destroying value on every call.
+
+`roundTripLoss` exists so that can be checked *before* it happens:
+
+```solidity
+uint256 lost = Decimals.roundTripLoss(amount, 18, 6);
+if (lost > DUST_THRESHOLD) revert PrecisionLoss(lost);
+```
+
+A test asserts `amount - afterRoundTrip == roundTripLoss(amount)` exactly, so
+the prediction and the reality cannot drift apart.
+
+`widen` **reverts** rather than quietly narrowing when the target scale is
+smaller — a caller who reached for `widen` believes nothing is being lost, and
+doing the lossy thing silently would betray precisely that belief. `pow10`
+caps at 77, since `10**78` overflows a `uint256`.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -482,7 +533,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 174 passing
+npm test          # 199 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
