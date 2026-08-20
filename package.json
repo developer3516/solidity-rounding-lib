@@ -13,6 +13,7 @@
     "contracts/Decimals.sol",
     "contracts/Liquidation.sol",
     "contracts/Sqrt.sol",
+    "contracts/Vesting.sol",
     "README.md",
     "LICENSE"
   ],

@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-249%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-274%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -457,6 +457,53 @@ only against another implementation of the same idea.
 
 ---
 
+## `Vesting` — where claim frequency becomes a fee
+
+The obvious linear vesting implementation computes each claim from the time
+since the last one:
+
+```solidity
+claim = total * (now - lastClaim) / duration;   // truncates, every time
+```
+
+Every claim that does not divide evenly loses a unit. A beneficiary who claims
+monthly ends up behind one who waits, and the contract ends holding a residue
+it can never pay out — because the final claim truncates the same way.
+**Claim frequency silently becomes a fee.**
+
+The fix is to track the *cumulative* amount vested and derive each claim by
+subtraction:
+
+```solidity
+uint256 owed = Vesting.claimable(total, alreadyClaimed, start, cliff, duration, block.timestamp);
+```
+
+Now every truncation happens in one place, against the same total, and the
+errors cannot accumulate. Whatever the schedule, the sum is `vestedAt(now)`
+exactly — the same shape as `Percentage.split`, and proved the same way:
+
+| claim schedule | `Vesting` | naive per-interval |
+| :--- | :--- | :--- |
+| once, at the end | **exactly the total** | short |
+| 48 monthly claims | **exactly the total** | short |
+| 1,096 daily claims | **exactly the total** | shorter still |
+| irregular and bursty | **exactly the total** | — |
+
+The last row of that second column is the point: the naive form loses *more*
+the more often it is claimed, and a test asserts precisely that.
+
+`vestedAt` rounds **down**, so a beneficiary can never claim ahead of schedule.
+Past the end of the term it returns the full total with no arithmetic at all —
+computing the tail through the same `mulDiv` would strand a few units
+permanently, so the end is an explicit case rather than a limit the arithmetic
+approaches. `vested + locked == total` holds at every instant.
+
+`claimable` **reverts** when the caller's accounting says more was claimed than
+has vested. Returning zero would hide a real inconsistency, and letting it
+underflow would give a panic that says nothing about what happened.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -637,7 +684,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 249 passing
+npm test          # 274 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
