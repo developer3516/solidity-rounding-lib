@@ -12,6 +12,7 @@
     "contracts/Interest.sol",
     "contracts/Decimals.sol",
     "contracts/Liquidation.sol",
+    "contracts/Sqrt.sol",
     "README.md",
     "LICENSE"
   ],

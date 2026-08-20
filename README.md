@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-222%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-249%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -409,6 +409,54 @@ rounds up is not a bound.
 
 ---
 
+## `Sqrt` — roots for AMM accounting
+
+The first liquidity provider in a Uniswap-V2-style pool mints
+`sqrt(amount0 * amount1)` LP tokens, and the constant-product invariant is
+compared through its root all over the place. Two things go wrong with the
+obvious implementation.
+
+**The direction.** `sqrt` truncates, and for an LP mint that is correct —
+issuing the ceiling hands the first provider a fraction of a token nobody
+deposited, and on an empty pool that fraction *is* the pool. But correct here is
+a choice, and a choice made silently is one a reviewer cannot check:
+
+```solidity
+Sqrt.geometricMean(2, 3, Rounding.Direction.Down);  // 2   — sqrt(6) = 2.449
+Sqrt.geometricMean(2, 3, Rounding.Direction.Up);    // 3
+```
+
+**The overflow.** `sqrt(a * b)` reverts whenever `a * b` passes 256 bits — which
+for two 18-decimal reserves is around 3.4e20 a side, and sooner for any token
+with more decimals or a low unit price. The product overflows long before the
+*root* does, so the failure is entirely avoidable:
+
+```solidity
+Sqrt.geometricMeanScaled(1e40, 1e40, 1e10, Down);  // works
+Sqrt.floorSqrt(1e40 * 1e40);                       // reverts — 1e80 > 2**256
+```
+
+Dividing inside the 512-bit intermediate brings the quotient back into range
+before the root is taken. The limitation is stated honestly and tested: the
+intermediate holds the product, but the *result* of the division still has to
+be a `uint256`, so a denominator of 1 changes nothing and still reverts.
+
+### The implementation
+
+Newton's method, seeded from the bit length, seven unrolled iterations — a
+fixed count beats a convergence check that would run the same comparison
+anyway. Newton converges from **above** and can land one too high, so the last
+line takes the smaller of the final two estimates. Without that correction the
+result is off by one on a band of inputs that spot checks miss entirely, which
+is why the suite walks every integer from 0 to 300, pins `n² − 1` and `n² + 1`
+around seven magnitudes, and fuzzes 400 values against a BigInt oracle across
+ten bit widths.
+
+It also checks the definition directly — `root² ≤ x < (root+1)²` — rather than
+only against another implementation of the same idea.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -589,7 +637,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 222 passing
+npm test          # 249 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
