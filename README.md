@@ -4,7 +4,7 @@
 direction is an argument, not an accident.
 
 ![Solidity](https://img.shields.io/badge/Solidity-%5E0.8.20-363636?logo=solidity&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-274%20passing-16A34A)
+![Tests](https://img.shields.io/badge/tests-298%20passing-16A34A)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
 ---
@@ -504,6 +504,54 @@ underflow would give a panic that says nothing about what happened.
 
 ---
 
+## `Slippage` — where the rule inverts a second time
+
+Every other library here rounds toward the protocol, because the counterparty
+is a voluntary depositor and the dust may as well stay with the pool.
+`Liquidation` inverts that once — the borrower is not in the room. This inverts
+it for a different reason, and the reason is worth being exact about.
+
+A slippage bound is **the user's own statement of what they will accept.** It
+is not a protocol parameter. So the question is not "which way favours the
+protocol" but "which way is faithful to what the user said", and the answer is
+that a bound must be **permissive**:
+
+| | rounds | so that |
+| :--- | :--- | :--- |
+| `minOut` | **Down** | it never demands more than was asked for |
+| `maxIn` | **Up** | it never offers less room than was allowed |
+
+Round `minOut` up instead and the contract quietly enforces a tolerance a
+fraction tighter than the one the user set. Trades that satisfy the user's
+actual limit revert — and **the failure is invisible**: the transaction reverts
+with "insufficient output" while the output was, by the user's own arithmetic,
+sufficient. Nobody debugs that from a revert string.
+
+The suite runs both forms side by side over a grid of quotes and tolerances and
+counts the cases where the strict floor rejects a trade the permissive one
+accepts.
+
+### The check is inclusive
+
+```solidity
+Slippage.requireMinOut(actual, floor);   // passes when actual == floor
+```
+
+Landing exactly on the stated limit *is* the limit being met. Rejecting it
+enforces `>` on a bound the user expressed as `>=`.
+
+`isWithinTolerance` reuses `minOut` rather than recomputing the floor, so
+asking and enforcing cannot disagree by a unit — a test pins the boundary from
+both sides.
+
+### Reporting rounds the other way
+
+`realisedBps` rounds **up**, because a report should never understate what
+happened. Slippage that rounds toward zero is the figure nobody notices
+drifting: a sub-basis-point loss reports as one basis point, not none.
+
+---
+
 ## The counterexample
 
 `contracts/examples/` holds two vaults. `RoundingVault` is a minimal
@@ -684,7 +732,7 @@ has a dedicated test.
 
 ```bash
 npm install
-npm test          # 274 passing
+npm test          # 298 passing
 npm run coverage
 npm run lint
 npm run bench     # gas vs OpenZeppelin and Solmate
